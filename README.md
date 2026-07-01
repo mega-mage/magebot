@@ -19,27 +19,55 @@
   - **底部**：交互式控制台，支持快捷命令。
 - **持久控制支持**：支持在 Monitor 界面内通过指令直接启停、连接或终止后台守护进程。
 
+## ⚙️ 系统依赖说明
+
+在部署运行之前，请确保宿主机安装有以下基础组件：
+1. **FFmpeg**：用于音视频格式转换与合并（由系统包管理器提供）。
+2. **OpenSSL & SQLite3 开发库**：Rust 编译和会话持久化必须（编译依赖）。
+3. **yt-dlp**：作为非公开或私密链接的强力下载引擎（保存在项目的 `dependency/` 目录下）。
+
+> [!NOTE]
+> 对于 Linux 用户，以上所有编译依赖及二进制依赖（包括自动拉取官方最新 `yt-dlp` 的 Linux 平台执行文件）均已包含在下面的**一键部署脚本**中，无需手动下载。
+
+## 🚀 部署指南 (Linux 一键部署)
+
+我们提供了一键式部署与编译脚本 [**`deploy.sh`**](file:///j:/RustProjects/upload_tel_bot/deploy.sh)，支持在 Debian/Ubuntu/CentOS 服务器上完成一键初始化：
+
+```bash
+# 1. 克隆代码仓库并进入目录
+git clone https://github.com/mega-mage/magebot.git
+cd magebot
+
+# 2. 赋予脚本执行权限并运行
+chmod +x deploy.sh
+./deploy.sh
+```
+
+> 该脚本会自动安装 `ffmpeg`、`curl` 以及编译依赖，配置 `Rust` 工具链，拉取最新 Linux x86_64 版 `yt-dlp` 并放置于 `dependency/`，完成 Release 模式构建，最终将 `magebot` 全局注册到 `/usr/local/bin`。
+
+---
+
 ## 🛠️ 快速开始
 
 ### 1. 配置参数
 
-配置文件位于 `~/.magebot/config.toml`：
-```toml
-api_id = 123456
-api_hash = "your_api_hash"
-download_dir = "downloads"
-# 可选设置
-# yt_dlp_args = "--format mp4"
+配置文件位于 `~/.magebot/config.toml`（在一键脚本运行完后可通过以下命令进行交互式设置）：
+```bash
+# 依次设置 Telegram API 参数及监控文件夹
+magebot set api_id <your_api_id>
+magebot set api_hash <your_api_hash>
+magebot set phone_number <+86...>
+magebot set watch_dir </path/to/watch_folder>
+
+# (可选) 设置加密存储的平台 Cookie (支持 YouTube / Bilibili / Twitter)
+magebot set cookie
 ```
 
-### 2. 命令行工具 (CLI)
+### 2. 命令行控制 (CLI)
 
 ```bash
-# 登录授权 Telegram 账号
+# 登录授权 Telegram 账号 (首次运行需输入验证码)
 magebot login
-
-# 交互式设置平台 Cookie (支持 YouTube / Bilibili / Twitter 等)
-magebot set cookie
 
 # 后台守护进程控制
 magebot start     # 启动
