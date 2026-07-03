@@ -98,3 +98,17 @@ magebot monitor
 - `stop`           : 安全停止后台守护进程。
 - `help`           : 列出所有可用命令说明。
 - `exit`           : 退出监控面板（保持守护进程运行）。
+
+---
+
+## 🗑️ 一键卸载 (Linux)
+
+我们提供了一键卸载脚本 [**`uninstall.sh`**](file:///j:/RustProjects/upload_tel_bot/uninstall.sh) 用于安全停止后台守护进程并清理相关配置：
+
+```bash
+# 1. 赋予脚本执行权限并运行
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+> 该脚本会自动停止并终止正在运行的后台守护进程，清除注册的全局可执行文件（`/usr/local/bin/magebot`），并在运行中提示你是否清除本地缓存数据与登录状态文件夹（`~/.magebot`）。
