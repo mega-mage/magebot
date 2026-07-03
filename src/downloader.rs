@@ -535,7 +535,19 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
             let upload_filename = final_path.file_name().unwrap().to_string_lossy().to_string();
             let file_size = tokio::fs::metadata(&final_path).await.map(|m| m.len()).unwrap_or(0);
 
-            // Register active upload task in IPC
+            // Register active upload task in IPC as Pending
+            crate::ipc::update_task(
+                &upload_task_id,
+                crate::ipc::TaskType::Upload,
+                &upload_filename,
+                crate::ipc::TaskStatus::Pending,
+            );
+
+            // Wait for a slot in the upload queue
+            let semaphore = crate::watcher::get_upload_semaphore();
+            let _permit = semaphore.acquire().await;
+
+            // Update task status to Uploading
             crate::ipc::update_task(
                 &upload_task_id,
                 crate::ipc::TaskType::Upload,
@@ -865,6 +877,17 @@ async fn try_download_twitter_media(
                     &ul_task_id,
                     crate::ipc::TaskType::Upload,
                     &filename_display,
+                    crate::ipc::TaskStatus::Pending,
+                );
+
+                // Wait for a slot in the upload queue
+                let semaphore = crate::watcher::get_upload_semaphore();
+                let _permit = semaphore.acquire().await;
+
+                crate::ipc::update_task(
+                    &ul_task_id,
+                    crate::ipc::TaskType::Upload,
+                    &filename_display,
                     crate::ipc::TaskStatus::Uploading {
                         progress: 0.0,
                         speed: "2.4 MiB/s".to_string(),
@@ -1068,6 +1091,18 @@ async fn try_download_twitter_media(
 
     // Now upload each file and send
     logger::info("Downloader: Uploading downloaded photos to Telegram...");
+
+    // Register as Pending
+    crate::ipc::update_task(
+        &upload_task_id,
+        crate::ipc::TaskType::Upload,
+        &upload_filename,
+        crate::ipc::TaskStatus::Pending,
+    );
+
+    // Wait for a slot in the upload queue
+    let semaphore = crate::watcher::get_upload_semaphore();
+    let _permit = semaphore.acquire().await;
     
     let caption = format!("[Uploaded] {}", url);
     for (idx, path) in downloaded_files.iter().enumerate() {

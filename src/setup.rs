@@ -75,6 +75,7 @@ pub fn print_set_help() {
   yt_dlp_args    yt-dlp 额外自定义参数 (例如: "--cookies-from-browser chrome" 用于规避机器人验证)
   watch_rule     自定义监控目录和目标群组 (格式: "magebot set watch_rule <目录路径>:<目标群组ID或用户名>")
   del_watch_rule 删除指定监控目录规则 (格式: "magebot set del_watch_rule <目录路径>")
+  max_concurrent_uploads 限制最大同时上传的文件数量 (例如: "magebot set max_concurrent_uploads 2")
 "#);
 }
 
@@ -199,9 +200,13 @@ pub fn run_set(args: &[String]) -> Result<(), String> {
         "yt_dlp_args" => {
             config.yt_dlp_args = Some(clean_val.clone());
         }
+        "max_concurrent_uploads" => {
+            let limit = clean_val.parse::<usize>().map_err(|_| "max_concurrent_uploads must be a positive integer")?;
+            config.max_concurrent_uploads = Some(limit);
+        }
         _ => {
             return Err(format!(
-                "Unknown configuration key: '{}'. Valid keys: api_id, api_hash, phone_number, watch_dir, auto_delete, download_dir, yt_dlp_path, yt_dlp_args, watch_rule, del_watch_rule",
+                "Unknown configuration key: '{}'. Valid keys: api_id, api_hash, phone_number, watch_dir, auto_delete, download_dir, yt_dlp_path, yt_dlp_args, watch_rule, del_watch_rule, max_concurrent_uploads",
                 key
             ));
         }

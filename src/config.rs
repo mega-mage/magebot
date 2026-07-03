@@ -14,6 +14,7 @@ pub struct Config {
     pub yt_dlp_path: Option<String>,
     pub yt_dlp_args: Option<String>,
     pub watch_rules: Option<std::collections::HashMap<String, String>>,
+    pub max_concurrent_uploads: Option<usize>,
 }
 
 impl Config {

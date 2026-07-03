@@ -64,6 +64,42 @@ fn expand_tilde(path_str: &str) -> PathBuf {
     }
 }
 
+fn get_total_memory_kb() -> Option<u64> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("powershell")
+            .args(&["-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"])
+            .output()
+            .ok()?;
+        let s = String::from_utf8_lossy(&output.stdout);
+        for line in s.lines() {
+            let line = line.trim();
+            if !line.is_empty() && line.chars().all(|c| c.is_ascii_digit()) {
+                if let Ok(bytes) = line.parse::<u64>() {
+                    return Some(bytes / 1024);
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+            for line in content.lines() {
+                if line.starts_with("MemTotal:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(kb) = parts[1].parse::<u64>() {
+                            return Some(kb);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
 pub async fn run_checks() -> Result<(), String> {
     let config = Config::load();
     let mut missing = Vec::new();
@@ -125,6 +161,60 @@ pub async fn run_checks() -> Result<(), String> {
     if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().success() {
         println!("Warning: ffmpeg not found in PATH or dependency folder. yt-dlp might fail to merge high-quality video/audio streams.");
     }
+
+    // Server performance diagnostics check
+    let cpu_cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    println!("\n====== 服务器性能诊断 (Server Performance Diagnostics) ======");
+    println!("逻辑 CPU 核心数 (CPU Cores): {}", cpu_cores);
+    
+    let total_ram_mb = if let Some(kb) = get_total_memory_kb() {
+        let mb = kb / 1024;
+        println!("物理内存总量 (Total RAM): {:.2} GB ({} MB)", mb as f64 / 1024.0, mb);
+        Some(mb)
+    } else {
+        println!("物理内存总量 (Total RAM): 未能检测到 (Unknown)");
+        None
+    };
+
+    let recommended_uploads = if let Some(ram) = total_ram_mb {
+        if ram < 1000 {
+            1
+        } else if ram < 2000 {
+            2
+        } else {
+            if cpu_cores <= 2 { 3 } else { 4 }
+        }
+    } else {
+        3
+    };
+
+    println!("\n优化策略推荐 (Recommended Optimization Strategy):");
+    if let Some(ram) = total_ram_mb {
+        if ram < 1000 {
+            println!("⚠️  检测到服务器内存较小（目前为 {} MB < 1GB）。在大量并发上传时可能面临内存耗尽（OOM）风险。", ram);
+            println!("👉 推荐限制最大同时上传任务数为: 1 (max_concurrent_uploads = 1)");
+        } else if ram < 2000 {
+            println!("ℹ️  检测到服务器内存中等（目前为 {} MB）。", ram);
+            println!("👉 推荐限制最大同时上传任务数为: 2 (max_concurrent_uploads = 2)");
+        } else {
+            println!("✅ 服务器物理内存充足（目前为 {} MB）。", ram);
+            println!("👉 推荐最大同时上传任务数为: {} (max_concurrent_uploads = {})", recommended_uploads, recommended_uploads);
+        }
+    } else {
+        println!("👉 推荐限制最大同时上传任务数为: 3 (max_concurrent_uploads = 3)");
+    }
+
+    let configured_limit = config.max_concurrent_uploads;
+    match configured_limit {
+        Some(limit) => {
+            println!("当前已配置的最大上传限制为: {} (max_concurrent_uploads = {})", limit, limit);
+        }
+        None => {
+            println!("当前未显式配置上传限制。系统将使用默认限制: 3");
+            println!("💡 你可以通过运行 `magebot set max_concurrent_uploads <数量>` 来手动调整此参数。");
+        }
+    }
+    println!("==============================================================\n");
 
     // Check if session file exists
     let session_path = Config::get_session_path();

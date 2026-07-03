@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Semaphore;
 use tokio::fs;
 use grammers_client::Client;
 use grammers_session::defs::{PeerId, PeerRef};
@@ -18,6 +20,18 @@ struct ActiveRule {
     path: PathBuf,
     target_str: String,
     target_peer: Option<PeerRef>,
+}
+
+// Global semaphore for controlling concurrent uploads
+pub static UPLOAD_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+pub fn get_upload_semaphore() -> Arc<Semaphore> {
+    UPLOAD_SEMAPHORE.get_or_init(|| {
+        let config = crate::config::Config::load();
+        let limit = config.max_concurrent_uploads.unwrap_or(3);
+        logger::info(&format!("Watcher: Initializing upload semaphore with limit = {}", limit));
+        Arc::new(Semaphore::new(limit))
+    }).clone()
 }
 
 fn parse_peer_id(id: i64) -> PeerId {
@@ -126,6 +140,7 @@ pub async fn run_watcher(client: Client, config: Config) {
     ));
 
     let mut file_states: HashMap<PathBuf, FileState> = HashMap::new();
+    let uploading_files: Arc<Mutex<HashSet<PathBuf>>> = Arc::new(Mutex::new(HashSet::new()));
 
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -182,6 +197,11 @@ pub async fn run_watcher(client: Client, config: Config) {
                     continue;
                 }
 
+                // If this file is currently uploading, skip it
+                if uploading_files.lock().unwrap().contains(&path) {
+                    continue;
+                }
+
                 // Exclude hidden files
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with('.') || name.ends_with(".uploaded") {
@@ -217,137 +237,163 @@ pub async fn run_watcher(client: Client, config: Config) {
                     let upload_task_id = format!("ul_watch_{}", upload_filename);
                     let file_size = fs::metadata(&path).await.map(|m| m.len()).unwrap_or(0);
 
+                    // 1. Mark file as currently uploading to prevent duplicate tasks
+                    uploading_files.lock().unwrap().insert(path.clone());
+
+                    // 2. Register task as Pending (queued) in IPC
                     crate::ipc::update_task(
                         &upload_task_id,
                         crate::ipc::TaskType::Upload,
                         &upload_filename,
-                        crate::ipc::TaskStatus::Uploading {
-                            progress: 0.0,
-                            speed: "2.4 MiB/s".to_string(),
-                            eta: "--s".to_string(),
-                        },
+                        crate::ipc::TaskStatus::Pending,
                     );
 
-                    // Spawn background simulation task
-                    let upload_task_id_clone = upload_task_id.clone();
-                    let upload_filename_clone = upload_filename.clone();
-                    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-
-                    tokio::spawn(async move {
-                        let speed_bytes = 2_500_000_u64; // ~2.4 MiB/s
-                        let mut elapsed = 0.0;
-                        let tick_sec = 0.5;
-                        loop {
-                            tokio::select! {
-                                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
-                                    elapsed += tick_sec;
-                                    let uploaded = (elapsed * speed_bytes as f64) as u64;
-                                    let progress = if file_size > 0 {
-                                        ((uploaded as f64 / file_size as f64) * 100.0).min(95.0)
-                                    } else {
-                                        95.0
-                                    };
-                                    let speed_str = "2.4 MiB/s".to_string();
-                                    let eta_str = if file_size > uploaded {
-                                        format!("{}s", ((file_size - uploaded) / speed_bytes).max(1))
-                                    } else {
-                                        "1s".to_string()
-                                    };
-
-                                    crate::ipc::update_task(
-                                        &upload_task_id_clone,
-                                        crate::ipc::TaskType::Upload,
-                                        &upload_filename_clone,
-                                        crate::ipc::TaskStatus::Uploading {
-                                            progress,
-                                            speed: speed_str,
-                                            eta: eta_str,
-                                        },
-                                    );
-                                }
-                                _ = &mut cancel_rx => {
-                                    break;
-                                }
-                            }
-                        }
-                    });
-
-                    // Upload and send file via grammers MTProto
+                    // 3. Spawn asynchronous upload handler
                     let client_up = client.clone();
                     let path_up = path.clone();
                     let target_chat_up = target_chat.clone();
-                    let upload_result = async {
-                        let uploaded = client_up.upload_file(&path_up).await?;
-                        client_up.send_message(target_chat_up, InputMessage::new().file(uploaded)).await
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    }.await;
+                    let upload_task_id_spawn = upload_task_id.clone();
+                    let upload_filename_spawn = upload_filename.clone();
+                    let rule_target_str = rule.target_str.clone();
+                    let uploading_files_clone = uploading_files.clone();
 
-                    let _ = cancel_tx.send(());
+                    tokio::spawn(async move {
+                        // Wait for a slot in the semaphore queue
+                        let semaphore = get_upload_semaphore();
+                        let _permit = semaphore.acquire().await;
 
-                    match upload_result {
-                        Ok(_) => {
-                            logger::info(&format!(
-                                "Watcher: Uploaded successfully via MTProto to target '{}': {:?}",
-                                rule.target_str, path
-                            ));
+                        logger::info(&format!("Watcher: Upload queue slot acquired for {:?}", path_up));
 
-                            crate::ipc::update_task(
-                                &upload_task_id,
-                                crate::ipc::TaskType::Upload,
-                                &upload_filename,
-                                crate::ipc::TaskStatus::Completed,
-                            );
-                            let upload_task_id_rm = upload_task_id.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                                crate::ipc::remove_task(&upload_task_id_rm);
-                            });
+                        // Update status to Uploading
+                        crate::ipc::update_task(
+                            &upload_task_id_spawn,
+                            crate::ipc::TaskType::Upload,
+                            &upload_filename_spawn,
+                            crate::ipc::TaskStatus::Uploading {
+                                progress: 0.0,
+                                speed: "2.4 MiB/s".to_string(),
+                                eta: "--s".to_string(),
+                            },
+                        );
 
-                            if auto_delete {
-                                if let Err(e) = fs::remove_file(&path).await {
-                                    logger::error(&format!("Watcher: Failed to delete file {:?}: {}", path, e));
-                                } else {
-                                    logger::info(&format!("Watcher: Deleted local file: {:?}", path));
-                                }
-                            } else {
-                                let mut new_path = path.clone();
-                                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                                    new_path.set_extension(format!("{}.uploaded", ext));
-                                } else {
-                                    new_path.set_extension("uploaded");
-                                }
+                        // Spawn simulation task
+                        let upload_task_id_clone = upload_task_id_spawn.clone();
+                        let upload_filename_clone = upload_filename_spawn.clone();
+                        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
-                                if let Err(e) = fs::rename(&path, &new_path).await {
-                                    logger::error(&format!(
-                                        "Watcher: Failed to rename file {:?} -> {:?}: {}",
-                                        path, new_path, e
-                                    ));
-                                } else {
-                                    logger::info(&format!("Watcher: Marked file as uploaded: {:?}", new_path));
+                        tokio::spawn(async move {
+                            let speed_bytes = 2_500_000_u64; // ~2.4 MiB/s
+                            let mut elapsed = 0.0;
+                            let tick_sec = 0.5;
+                            loop {
+                                tokio::select! {
+                                    _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                                        elapsed += tick_sec;
+                                        let uploaded = (elapsed * speed_bytes as f64) as u64;
+                                        let progress = if file_size > 0 {
+                                            ((uploaded as f64 / file_size as f64) * 100.0).min(95.0)
+                                        } else {
+                                            95.0
+                                        };
+                                        let speed_str = "2.4 MiB/s".to_string();
+                                        let eta_str = if file_size > uploaded {
+                                            format!("{}s", ((file_size - uploaded) / speed_bytes).max(1))
+                                        } else {
+                                            "1s".to_string()
+                                        };
+
+                                        crate::ipc::update_task(
+                                            &upload_task_id_clone,
+                                            crate::ipc::TaskType::Upload,
+                                            &upload_filename_clone,
+                                            crate::ipc::TaskStatus::Uploading {
+                                                progress,
+                                                speed: speed_str,
+                                                eta: eta_str,
+                                            },
+                                        );
+                                    }
+                                    _ = &mut cancel_rx => {
+                                        break;
+                                    }
                                 }
                             }
+                        });
+
+                        // Upload file
+                        let upload_result = async {
+                            let uploaded = client_up.upload_file(&path_up).await?;
+                            client_up.send_message(target_chat_up, InputMessage::new().file(uploaded)).await
+                                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                        }.await;
+
+                        let _ = cancel_tx.send(());
+
+                        match upload_result {
+                            Ok(_) => {
+                                logger::info(&format!(
+                                    "Watcher: Uploaded successfully via MTProto to target '{}': {:?}",
+                                    rule_target_str, path_up
+                                ));
+
+                                crate::ipc::update_task(
+                                    &upload_task_id_spawn,
+                                    crate::ipc::TaskType::Upload,
+                                    &upload_filename_spawn,
+                                    crate::ipc::TaskStatus::Completed,
+                                );
+                                let upload_task_id_rm = upload_task_id_spawn.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                    crate::ipc::remove_task(&upload_task_id_rm);
+                                });
+
+                                if auto_delete {
+                                    if let Err(e) = fs::remove_file(&path_up).await {
+                                        logger::error(&format!("Watcher: Failed to delete file {:?}: {}", path_up, e));
+                                    } else {
+                                        logger::info(&format!("Watcher: Deleted local file: {:?}", path_up));
+                                    }
+                                } else {
+                                    let mut new_path = path_up.clone();
+                                    if let Some(ext) = path_up.extension().and_then(|e| e.to_str()) {
+                                        new_path.set_extension(format!("{}.uploaded", ext));
+                                    } else {
+                                        new_path.set_extension("uploaded");
+                                    }
+
+                                    if let Err(e) = fs::rename(&path_up, &new_path).await {
+                                        logger::error(&format!(
+                                            "Watcher: Failed to rename file {:?} -> {:?}: {}",
+                                            path_up, new_path, e
+                                        ));
+                                    } else {
+                                        logger::info(&format!("Watcher: Marked file as uploaded: {:?}", new_path));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                logger::error(&format!("Watcher: Failed to upload file {:?}: {:?}", path_up, e));
+
+                                crate::ipc::update_task(
+                                    &upload_task_id_spawn,
+                                    crate::ipc::TaskType::Upload,
+                                    &upload_filename_spawn,
+                                    crate::ipc::TaskStatus::Failed(e.to_string()),
+                                );
+                                let upload_task_id_rm = upload_task_id_spawn.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                    crate::ipc::remove_task(&upload_task_id_rm);
+                                });
+                            }
                         }
-                        Err(e) => {
-                            logger::error(&format!("Watcher: Failed to upload file {:?}: {:?}", path, e));
 
-                            crate::ipc::update_task(
-                                &upload_task_id,
-                                crate::ipc::TaskType::Upload,
-                                &upload_filename,
-                                crate::ipc::TaskStatus::Failed(e.to_string()),
-                            );
-                            let upload_task_id_rm = upload_task_id.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                                crate::ipc::remove_task(&upload_task_id_rm);
-                            });
+                        // Remove from active uploading file list
+                        uploading_files_clone.lock().unwrap().remove(&path_up);
+                    });
 
-                            // Reset ticks so we wait before retrying next time
-                            state.stable_ticks = 0;
-                        }
-                    }
-
-                    // Remove from state mapping so it doesn't get processed again
+                    // Remove from local size state tracking map
                     file_states.remove(&path);
                 }
             }
