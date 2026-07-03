@@ -60,11 +60,30 @@ curl -L "$YTDLP_URL" -o dependency/yt-dlp
 chmod +x dependency/yt-dlp
 echo "✅ yt-dlp 准备完毕。"
 
-# 5. 编译编译项目 (Release 模式)
+# 5. 将 yt-dlp 注册到系统全局路径 (/usr/local/bin/yt-dlp)
+if [ -f /usr/local/bin/yt-dlp ]; then
+    echo "ℹ️  系统全局路径中已存在 yt-dlp (/usr/local/bin/yt-dlp)。"
+    read -p "是否覆盖已有的全局 yt-dlp 文件？[y/N]: " overwrite_ytdlp
+    if [[ "$overwrite_ytdlp" =~ ^[Yy]$ ]]; then
+        echo "正在覆盖安装 yt-dlp 到 /usr/local/bin..."
+        sudo cp dependency/yt-dlp /usr/local/bin/yt-dlp
+        sudo chmod +x /usr/local/bin/yt-dlp
+        echo "✅ 全局 yt-dlp 更新完成。"
+    else
+        echo "ℹ️  跳过覆盖，保持原有的全局 yt-dlp 文件不变。"
+    fi
+else
+    echo "正在安装 yt-dlp 到系统全局路径 /usr/local/bin/yt-dlp..."
+    sudo cp dependency/yt-dlp /usr/local/bin/yt-dlp
+    sudo chmod +x /usr/local/bin/yt-dlp
+    echo "✅ 全局 yt-dlp 安装完成。"
+fi
+
+# 6. 编译编译项目 (Release 模式)
 echo "正在编译 Magebot (Release 模式)..."
 cargo build --release
 
-# 6. 将编译产物安装到系统全局路径以便直接调用
+# 7. 将编译产物安装到系统全局路径以便直接调用
 echo "正在安装 magebot 二进制文件到 /usr/local/bin..."
 sudo cp target/release/magebot /usr/local/bin/magebot
 sudo chmod +x /usr/local/bin/magebot
