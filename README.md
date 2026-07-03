@@ -18,6 +18,7 @@
   - **右侧**：精简过滤后的系统日志，仅显示 Saved Messages 内的动作及系统事件。
   - **底部**：交互式控制台，支持快捷命令。
 - **持久控制支持**：支持在 Monitor 界面内通过指令直接启停、连接或终止后台守护进程。
+- **多目录与多群组智能分流 (Custom Watch Rules)**：支持配置多个本地监控文件夹，并将不同的文件夹分流直传到不同的 Telegram 目标群组或频道。路径支持波浪号 `~` 自动解析（例如将 `~/.magebot/savings` 解析为系统绝对家目录），并支持使用群组/频道 ID（如 `-100xxxx` 或 `-xxxx`）以及公共用户名（如 `@channel`）作为投递目标。
 
 ## ⚙️ 系统依赖说明
 
@@ -54,11 +55,21 @@ chmod +x deploy.sh
 
 配置文件位于 `~/.magebot/config.toml`（在一键脚本运行完后可通过以下命令进行交互式设置）：
 ```bash
-# 依次设置 Telegram API 参数及监控文件夹
+# 依次设置 Telegram API 参数及默认监控文件夹 (默认上传至收藏夹)
 magebot set api_id <your_api_id>
 magebot set api_hash <your_api_hash>
 magebot set phone_number <+86...>
 magebot set watch_dir </path/to/watch_folder>
+
+# (可选) 设置多目录直传群组/频道的分流规则 (路径支持 ~ 波浪号自动解析)
+magebot set watch_rule "<本地目录路径>:<目标群组ID或用户名>"
+# 示例 1: 监控 ~/.magebot/savings 并分传到测试群组 -5589877937
+magebot set watch_rule "~/.magebot/savings:-5589877937"
+# 示例 2: 监控 D:\Uploads 并分传到公共频道 @my_channel
+magebot set watch_rule "D:\Uploads:@my_channel"
+
+# (可选) 删除已有的多目录分流规则
+magebot set del_watch_rule "<本地目录路径>"
 
 # (可选) 设置加密存储的平台 Cookie (支持 YouTube / Bilibili / Twitter)
 magebot set cookie
