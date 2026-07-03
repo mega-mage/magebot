@@ -10,6 +10,24 @@ pub fn read_line(prompt: &str) -> Result<String, String> {
     Ok(input.trim().to_string())
 }
 
+pub fn read_multiline(prompt: &str) -> Result<String, String> {
+    println!("{}", prompt);
+    println!("(请输入或粘贴内容，在独立新行中输入 'EOF' 并回车结束)：");
+    io::stdout().flush().map_err(|e| e.to_string())?;
+
+    let mut lines = Vec::new();
+    loop {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).map_err(|e| e.to_string())?;
+        let trimmed = input.trim();
+        if trimmed == "EOF" {
+            break;
+        }
+        lines.push(input);
+    }
+    Ok(lines.join("").trim().to_string())
+}
+
 pub fn parse_key_value(args: &[String]) -> Result<(String, String), String> {
     if args.is_empty() {
         return Err("Usage: magebot set <key>:<value> OR magebot set <key> <value>".to_string());
@@ -81,16 +99,14 @@ pub fn run_interactive_set_cookie() -> Result<(), String> {
         _ => return Err("无效选项".to_string()),
     };
 
-    println!("\n请输入或粘贴平台 '{}' 的 Cookie 串 / Netscape 格式文本：", platform);
-    let cookie_content = read_line("Cookie: ")?;
-    let cookie_content = cookie_content.trim();
+    let cookie_content = read_multiline(&format!("\n请准备输入或粘贴平台 '{}' 的 Cookie 串 / Netscape 格式 / JSON 数组格式：", platform))?;
     if cookie_content.is_empty() {
         return Err("Cookie 内容不能为空".to_string());
     }
 
     // Encrypt
     let key = crypto::get_encryption_key()?;
-    let encrypted = crypto::encrypt_cookie(cookie_content, &key)?;
+    let encrypted = crypto::encrypt_cookie(&cookie_content, &key)?;
 
     // Load toml, insert, save
     let mut cookies_map = crypto::load_cookies_toml()?;

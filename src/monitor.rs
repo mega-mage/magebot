@@ -100,15 +100,23 @@ pub async fn run_monitor() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Create channels for TUI thread communication
     let (tx_tui, mut rx_tui) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
 
-    // Spawn crossterm event reader task
+    // Spawn crossterm event reader task on a blocking thread pool to avoid starving the single-core executor
     let tx_tui_input = tx_tui.clone();
-    tokio::spawn(async move {
+    tokio::task::spawn_blocking(move || {
         loop {
-            if event::poll(Duration::from_millis(50)).unwrap() {
-                if let Event::Key(key) = event::read().unwrap() {
-                    if key.kind == event::KeyEventKind::Press {
-                        let _ = tx_tui_input.send(TuiEvent::Input(key));
+            match event::poll(Duration::from_millis(50)) {
+                Ok(true) => {
+                    if let Ok(Event::Key(key)) = event::read() {
+                        if key.kind == event::KeyEventKind::Press {
+                            if tx_tui_input.send(TuiEvent::Input(key)).is_err() {
+                                break;
+                            }
+                        }
                     }
+                }
+                Ok(false) => {}
+                Err(_) => {
+                    break;
                 }
             }
         }

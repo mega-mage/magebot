@@ -46,13 +46,21 @@ pub fn is_video_url(text: &str) -> bool {
         || text_lower.contains("twitter.com/")
         || text_lower.contains("x.com/")
         || text_lower.contains("twitch.tv/")
+        || text_lower.contains("bilibili.com/")
+        || text_lower.contains("bili.live/")
+        || text_lower.contains("b23.tv/")
+        || text_lower.contains("bilibili.tv/")
 }
 
 fn detect_platform(url: &str) -> Option<&'static str> {
     let lower = url.to_lowercase();
     if lower.contains("youtube.com") || lower.contains("youtu.be") {
         Some("youtube")
-    } else if lower.contains("bilibili.com") || lower.contains("bili.live") {
+    } else if lower.contains("bilibili.com")
+        || lower.contains("bili.live")
+        || lower.contains("b23.tv")
+        || lower.contains("bilibili.tv")
+    {
         Some("bilibili")
     } else if lower.contains("twitter.com") || lower.contains("x.com") {
         Some("twitter")
@@ -230,6 +238,8 @@ async fn get_expected_filename(
 
     let mut cmd = Command::new(yt_dlp_path);
     cmd.arg("--no-playlist");
+    cmd.arg("--js-runtimes");
+    cmd.arg("node");
     if let Some(args_str) = yt_dlp_args {
         add_filtered_args(&mut cmd, args_str, temp_cookie_path.is_some() || no_cookies);
     }
@@ -354,6 +364,8 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
 
     let mut cmd = Command::new(&yt_dlp_path);
     cmd.arg("--no-playlist");
+    cmd.arg("--js-runtimes");
+    cmd.arg("node");
     if let Some(ref args_str) = config.yt_dlp_args {
         add_filtered_args(&mut cmd, args_str, temp_cookie_path.is_some() || no_cookies_flag);
     }

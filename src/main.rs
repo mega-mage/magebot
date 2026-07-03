@@ -420,6 +420,10 @@ mod tests {
         assert!(is_video_url("https://x.com/username/status/123456"));
         assert!(is_video_url("https://twitter.com/username/status/123456"));
         assert!(is_video_url("https://www.twitch.tv/videos/123456789"));
+        assert!(is_video_url("https://www.bilibili.com/video/BV1xx"));
+        assert!(is_video_url("https://b23.tv/BV1xx"));
+        assert!(is_video_url("https://bili.live/123456"));
+        assert!(is_video_url("https://www.bilibili.tv/en/video/123"));
         assert!(!is_video_url("https://google.com"));
     }
 }
