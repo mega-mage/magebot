@@ -52,29 +52,42 @@ pub fn parse_key_value(args: &[String]) -> Result<(String, String), String> {
     Ok((key, clean_val))
 }
 
+pub fn parse_watch_dir_input(input: &str) -> (String, String) {
+    let trimmed = input.trim();
+    if let Some((left, right)) = trimmed.rsplit_once(':') {
+        let right_clean = right.trim();
+        let left_clean = left.trim();
+        let is_path_component = right_clean.contains('/') || right_clean.contains('\\');
+        if !is_path_component && !left_clean.is_empty() {
+            let is_known_target = right_clean.eq_ignore_ascii_case("me")
+                || right_clean.eq_ignore_ascii_case("saved")
+                || right_clean.eq_ignore_ascii_case("saved_messages")
+                || right_clean.starts_with('@')
+                || right_clean.parse::<i64>().is_ok();
+            if is_known_target || left_clean.contains('/') || left_clean.contains('\\') {
+                return (left_clean.to_string(), right_clean.to_string());
+            }
+        }
+    }
+    (trimmed.to_string(), "me".to_string())
+}
+
 pub fn print_set_help() {
     println!(r#"Magebot 参数设置命令 (set)
 
 使用方法:
-  magebot set <参数名>:<值>      (例如: magebot set api_id:123456)
-  magebot set <参数名>:[值]      (例如: magebot set api_hash:[abcdef])
-  magebot set <参数名> <值>      (例如: magebot set phone_number "+86138xxxx")
+  magebot set <参数名>:<值>      (例如: magebot set auto_delete:true)
+  magebot set <参数名> <值>      (例如: magebot set download_dir "/path/to/dir")
   magebot set cookie             (交互式设置平台的 Cookie，进行加密保存)
 
-必填参数:
-  api_id         Telegram API ID (在 my.telegram.org 申请)。
-  api_hash       Telegram API Hash (在 my.telegram.org 申请)。
-  phone_number   您的登录手机号 (需要包含国际区号，例如 +8613800000000)。
-  watch_dir      监控的文件夹路径，新写入完成的文件会自动上传到您的“收藏夹 (Saved Messages)”。
+提示: 账号登录请使用 `magebot login`，监控规则请使用 `magebot add/rm/ls/listen` 命令。
 
-可选参数:
+可配置参数:
   auto_delete    上传成功后是否自动删除本地文件。
                  可选值: true/false, 1/0, yes/no (默认: false，不删除则重命名为 .uploaded)
   download_dir   视频临时下载目录 (默认: ~/.magebot/downloads)
   yt_dlp_path    yt-dlp 可执行程序路径 (默认: 在系统环境变量 PATH 中寻找 "yt-dlp")
   yt_dlp_args    yt-dlp 额外自定义参数 (例如: "--cookies-from-browser chrome" 用于规避机器人验证)
-  watch_rule     自定义监控目录和目标群组 (格式: "magebot set watch_rule <目录路径>:<目标群组ID或用户名>")
-  del_watch_rule 删除指定监控目录规则 (格式: "magebot set del_watch_rule <目录路径>")
   max_concurrent_uploads 限制最大同时上传的文件数量 (例如: "magebot set max_concurrent_uploads 2")
 "#);
 }
@@ -136,52 +149,17 @@ pub fn run_set(args: &[String]) -> Result<(), String> {
     let (key, clean_val) = parse_key_value(args)?;
 
     match key.as_str() {
-        "api_id" => {
-            let id = clean_val.parse::<i32>().map_err(|_| "api_id must be an integer")?;
-            config.api_id = Some(id);
+        "api_id" | "api_hash" | "phone_number" => {
+            return Err(format!(
+                "'{}' 不能通过 'set' 命令设置。请使用 `magebot login` 交互式配置。",
+                key
+            ));
         }
-        "api_hash" => {
-            config.api_hash = Some(clean_val.clone());
-        }
-        "phone_number" => {
-            config.phone_number = Some(clean_val.clone());
-        }
-        "watch_dir" => {
-            config.watch_dir = Some(clean_val.clone());
-        }
-        "watch_rule" => {
-            if let Some((path, target)) = clean_val.rsplit_once(':') {
-                let path = path.trim().to_string();
-                let target = target.trim().to_string();
-                if path.is_empty() || target.is_empty() {
-                    return Err("Format must be path:target".to_string());
-                }
-                let mut rules = config.watch_rules.unwrap_or_default();
-                rules.insert(path.clone(), target.clone());
-                config.watch_rules = Some(rules);
-                
-                config.save().map_err(|e| format!("Failed to save config: {}", e))?;
-                println!("Successfully added watch rule: '{}' -> '{}'.", path, target);
-                return Ok(());
-            } else {
-                return Err("Format must be watch_rule <path>:<target> (e.g., watch_rule \"C:\\path:-1001234567890\")".to_string());
-            }
-        }
-        "del_watch_rule" => {
-            let path = clean_val.trim().to_string();
-            let mut removed = false;
-            if let Some(ref mut rules) = config.watch_rules {
-                if rules.remove(&path).is_some() {
-                    removed = true;
-                }
-            }
-            if removed {
-                config.save().map_err(|e| format!("Failed to save config: {}", e))?;
-                println!("Successfully removed watch rule for path: '{}'.", path);
-                return Ok(());
-            } else {
-                return Err(format!("No watch rule found for path: '{}'.", path));
-            }
+        "watch_dir" | "watch_rule" | "del_watch_dir" | "del_watch_rule" => {
+            return Err(format!(
+                "'{}' 已迁移。请使用 `magebot add <路径>[:<目标>]` 或 `magebot rm <ID或路径>` 命令。",
+                key
+            ));
         }
         "auto_delete" => {
             let val = match clean_val.to_lowercase().as_str() {
@@ -206,13 +184,106 @@ pub fn run_set(args: &[String]) -> Result<(), String> {
         }
         _ => {
             return Err(format!(
-                "Unknown configuration key: '{}'. Valid keys: api_id, api_hash, phone_number, watch_dir, auto_delete, download_dir, yt_dlp_path, yt_dlp_args, watch_rule, del_watch_rule, max_concurrent_uploads",
+                "未知参数: '{}'\n可用参数: auto_delete, download_dir, yt_dlp_path, yt_dlp_args, max_concurrent_uploads\n设置 Cookie: magebot set cookie\n监控规则: magebot add/rm/ls/listen",
                 key
             ));
         }
     }
 
     config.save().map_err(|e| format!("Failed to save config: {}", e))?;
-    println!("Successfully set '{}' to '{}'.", key, clean_val);
+    println!("✅ 成功设置 '{}' = '{}'", key, clean_val);
     Ok(())
 }
+
+pub fn run_add(rule_input: &str) -> Result<(), String> {
+    let (path, target) = parse_watch_dir_input(rule_input);
+    if path.is_empty() {
+        return Err("监控目录路径不能为空".to_string());
+    }
+    let mut config = Config::load();
+    let rule = config.add_or_update_watch_rule(path, target);
+    config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+    println!(
+        "✅ 成功添加/更新监控规则 [ID: {}]: '{}' → '{}' (listen_media: {})",
+        rule.id, rule.path, rule.target, rule.listen_media
+    );
+    Ok(())
+}
+
+pub fn run_rm(target: &str) -> Result<(), String> {
+    let mut config = Config::load();
+
+    // Try parsing as numeric ID first
+    if let Ok(id) = target.parse::<usize>() {
+        let rules = config.get_watch_rules();
+        if let Some(rule) = rules.iter().find(|r| r.id == id) {
+            let path = rule.path.clone();
+            let removed = config.remove_watch_rule(&path);
+            if removed {
+                config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+                println!("✅ 成功删除监控规则 [ID: {}]: '{}'", id, path);
+                return Ok(());
+            }
+        }
+        return Err(format!("未找到 ID 为 {} 的监控规则", id));
+    }
+
+    // Otherwise try as path
+    let removed = config.remove_watch_rule(target);
+    if removed {
+        config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+        println!("✅ 成功删除监控规则: '{}'", target);
+        Ok(())
+    } else {
+        Err(format!("未找到路径为 '{}' 的监控规则", target))
+    }
+}
+
+pub fn run_ls() {
+    let config = Config::load();
+    let rules = config.get_watch_rules();
+    let global_auto_delete = config.auto_delete.unwrap_or(false);
+
+    if rules.is_empty() {
+        println!("ℹ️ 当前未配置任何监控规则。你可以通过 `magebot add <目录路径>` 添加。");
+        println!("⚙️ 全局默认 auto_delete (自动删除本地文件): {}\n", global_auto_delete);
+        return;
+    }
+
+    println!("\n======= Magebot 监控规则列表 =======");
+    println!("⚙️ 全局默认 auto_delete: {}\n", global_auto_delete);
+    println!(
+        "{:<5} {:<35} {:<25} {:<10} {:<10}",
+        "ID", "监控目录", "目标", "监听", "自动删除"
+    );
+    println!("{}", "─".repeat(85));
+    for r in &rules {
+        let auto_del = r.get_auto_delete(config.auto_delete);
+        println!(
+            "{:<5} {:<35} {:<25} {:<10} {:<10}",
+            r.id, r.path, r.target,
+            if r.listen_media { "✅" } else { "❌" },
+            if auto_del { "✅" } else { "❌" }
+        );
+    }
+    println!("{}\n", "─".repeat(85));
+}
+
+pub fn run_listen(id: usize, enabled_str: &str) -> Result<(), String> {
+    let enabled = match enabled_str.trim().to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        _ => return Err("状态值必须为布尔值 (true/false)".to_string()),
+    };
+
+    let mut config = Config::load();
+    let updated = config.set_listen_media(id, enabled)?;
+    config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+
+    println!(
+        "✅ 规则 [ID: {}] ('{}') 媒体链接监听已设置为: {}",
+        updated.id, updated.path, if updated.listen_media { "开启 ✅" } else { "关闭 ❌" }
+    );
+    Ok(())
+}
+

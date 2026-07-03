@@ -20,6 +20,7 @@ aes-gcm = "0.10.3"
 rand = "0.8.5"
 ratatui = "0.26.1"
 crossterm = "0.27.0"
+cli-clipboard = "0.4"
 
 
 [patch.crates-io]

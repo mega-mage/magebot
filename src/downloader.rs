@@ -8,6 +8,7 @@ use grammers_client::types::InputMessage;
 use std::fs::File;
 use std::io::Write;
 use serde::Deserialize;
+use serde_json;
 
 use crate::config::Config;
 use crate::logger;
@@ -535,6 +536,18 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
             let upload_filename = final_path.file_name().unwrap().to_string_lossy().to_string();
             let file_size = tokio::fs::metadata(&final_path).await.map(|m| m.len()).unwrap_or(0);
 
+            // Write metadata file for crash recovery and retry
+            let ext_str = final_path.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+            let meta_path = final_path.with_extension(format!("{}.meta", ext_str));
+            let target_str = target_chat.id.bot_api_dialog_id().to_string();
+            let meta_json = serde_json::json!({
+                "url": url,
+                "target": target_str
+            });
+            if let Ok(meta_str) = serde_json::to_string(&meta_json) {
+                let _ = tokio::fs::write(&meta_path, meta_str).await;
+            }
+
             // Register active upload task in IPC as Pending
             crate::ipc::update_task(
                 &upload_task_id,
@@ -607,11 +620,31 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
             let client_up = client.clone();
             let final_path_up = final_path.clone();
             let target_chat_up = target_chat.clone();
-            let upload_result = async {
-                let uploaded = client_up.upload_file(&final_path_up).await?;
-                client_up.send_message(target_chat_up, InputMessage::new().file(uploaded).text(caption)).await
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            }.await;
+            
+            let mut upload_result = Err(std::io::Error::new(std::io::ErrorKind::Other, "Upload not started"));
+            // Retry up to 3 times
+            for attempt in 1..=3 {
+                logger::info(&format!("Downloader: Uploading video file (attempt {}): {:?}", attempt, final_path_up));
+                let client_up_inner = client_up.clone();
+                let final_path_up_inner = final_path_up.clone();
+                let target_chat_up_inner = target_chat_up.clone();
+                let caption_inner = caption.clone();
+                let res = async {
+                    let uploaded = client_up_inner.upload_file(&final_path_up_inner).await?;
+                    client_up_inner.send_message(target_chat_up_inner, InputMessage::new().file(uploaded).text(caption_inner)).await
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                }.await;
+
+                if res.is_ok() {
+                    upload_result = res;
+                    break;
+                } else {
+                    logger::warn(&format!("Downloader: Attempt {} to upload video failed: {:?}", attempt, res.unwrap_err()));
+                    if attempt < 3 {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
+            }
 
             let _ = cancel_tx.send(());
 
@@ -631,6 +664,9 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                         crate::ipc::remove_task(&upload_task_id_rm);
                     });
+
+                    // Remove meta file
+                    let _ = tokio::fs::remove_file(&meta_path).await;
 
                     if let Err(e) = tokio::fs::remove_file(&final_path).await {
                         logger::error(&format!("Downloader: Failed to clean up downloaded file {:?}: {}", final_path, e));
@@ -653,7 +689,7 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
                     }
                 }
                 Err(e) => {
-                    logger::error(&format!("Downloader: Failed to upload video {:?}: {:?}", final_path, e));
+                    logger::error(&format!("Downloader: Failed to upload video after 3 attempts {:?}: {:?}", final_path, e));
                     
                     // Update upload task to Failed
                     crate::ipc::update_task(
@@ -675,7 +711,7 @@ pub async fn handle_video_download(client: Client, config: Config, target_chat: 
                         id: delete_ids,
                     };
                     let _ = client.invoke(&delete_req).await;
-                    let _ = client.send_message(target_chat.clone(), format!("[Failed] {}\n❌ 上传视频失败: {:?}", url, e)).await;
+                    let _ = client.send_message(target_chat.clone(), format!("[Failed] {}\n❌ 上传视频失败 (已重试 3 次): {:?}", url, e)).await;
                 }
             }
         }

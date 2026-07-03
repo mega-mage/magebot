@@ -114,10 +114,9 @@ pub async fn run_checks() -> Result<(), String> {
         missing.push("phone_number");
     }
     
-    let has_watch = config.watch_dir.is_some() 
-        || config.watch_rules.as_ref().map(|r| !r.is_empty()).unwrap_or(false);
-    if !has_watch {
-        missing.push("watch_dir (或 watch_rules)");
+    let rules = config.get_watch_rules();
+    if rules.is_empty() {
+        missing.push("watch_dir");
     }
 
     if !missing.is_empty() {
@@ -125,12 +124,12 @@ pub async fn run_checks() -> Result<(), String> {
     }
 
     // Check watch_dir exists or create warning
-    if let Some(ref watch_dir) = config.watch_dir {
-        let watch_path = expand_tilde(watch_dir);
+    for rule in &rules {
+        let watch_path = expand_tilde(&rule.path);
         if !watch_path.exists() {
-            println!("Warning: watch_dir ({}) does not exist yet. It will be created when the bot starts.", watch_dir);
+            println!("Warning: watch_dir ({}) does not exist yet. It will be created when the bot starts.", rule.path);
         } else if !watch_path.is_dir() {
-            return Err(format!("watch_dir ({}) exists but is not a directory", watch_dir));
+            return Err(format!("watch_dir ({}) exists but is not a directory", rule.path));
         }
     }
 
@@ -347,6 +346,48 @@ pub async fn run_login() -> Result<(), String> {
         Err(e) => {
             return Err(format!("Sign in failed: {}", e));
         }
+    }
+
+    Ok(())
+}
+
+pub async fn run_logout() -> Result<(), String> {
+    // 1. If daemon is running, stop it
+    if let Some(pid) = crate::daemon::read_pid() {
+        if crate::daemon::is_process_alive(pid) {
+            println!("Stopping running daemon process (PID: {})...", pid);
+            if crate::daemon::kill_process(pid) {
+                crate::daemon::delete_pid_file();
+            }
+        } else {
+            crate::daemon::delete_pid_file();
+        }
+    }
+
+    // 2. Delete session file
+    let session_path = Config::get_session_path();
+    let mut session_removed = false;
+    if session_path.exists() {
+        std::fs::remove_file(&session_path).map_err(|e| format!("Failed to delete session file: {}", e))?;
+        session_removed = true;
+    }
+
+    // 3. Clear phone_number in config
+    let mut config = Config::load();
+    let mut config_changed = false;
+    if config.phone_number.is_some() {
+        config.phone_number = None;
+        config_changed = true;
+    }
+
+    if config_changed {
+        config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+    }
+
+    if session_removed || config_changed {
+        println!("✅ 成功退出登录！已清除登录凭证与手机号配置。如需再次使用请运行 `magebot login`。");
+    } else {
+        println!("ℹ️ 当前未登录或无有效会话信息。");
     }
 
     Ok(())

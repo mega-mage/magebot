@@ -55,21 +55,29 @@ chmod +x deploy.sh
 
 配置文件位于 `~/.magebot/config.toml`（在一键脚本运行完后可通过以下命令进行交互式设置）：
 ```bash
-# 依次设置 Telegram API 参数及默认监控文件夹 (默认上传至收藏夹)
-magebot set api_id <your_api_id>
-magebot set api_hash <your_api_hash>
-magebot set phone_number <+86...>
-magebot set watch_dir </path/to/watch_folder>
+# 1. 账号登录授权 (首次运行会自动交互式引导输入 Telegram API ID, API Hash 及手机号)
+magebot login
 
-# (可选) 设置多目录直传群组/频道的分流规则 (路径支持 ~ 波浪号自动解析)
-magebot set watch_rule "<本地目录路径>:<目标群组ID或用户名>"
-# 示例 1: 监控 ~/.magebot/savings 并分传到测试群组 -5589877937
-magebot set watch_rule "~/.magebot/savings:-5589877937"
-# 示例 2: 监控 D:\Uploads 并分传到公共频道 @my_channel
-magebot set watch_rule "D:\Uploads:@my_channel"
+# 2. 添加监控规则 (默认上传至"收藏夹 Saved Messages")
+magebot add </path/to/watch_folder>
 
-# (可选) 删除已有的多目录分流规则
-magebot set del_watch_rule "<本地目录路径>"
+# (可选) 添加监控规则并分流投递至特定群组/频道
+magebot add "<本地目录路径>:<目标群组ID或用户名>"
+# 示例 1: 监控 ~/.magebot/savings 并投递到测试群组
+magebot add "~/.magebot/savings:-5589877937"
+# 示例 2: 监控 D:\Uploads 并投递到公共频道
+magebot add "D:\Uploads:@my_channel"
+
+# (可选) 查看所有监控规则
+magebot ls
+
+# (可选) 开启指定规则 (ID) 对目标群组/频道内音视频链接的监听
+magebot listen <id> true
+# 示例: 开启规则 ID 1 的媒体链接监听
+magebot listen 1 true
+
+# (可选) 删除监控规则 (支持传入规则 ID 或目录路径)
+magebot rm <规则ID或目录路径>
 
 # (可选) 设置加密存储的平台 Cookie (支持 YouTube / Bilibili / Twitter)
 magebot set cookie
@@ -77,23 +85,40 @@ magebot set cookie
 
 ### 2. 命令行控制 (CLI)
 
-```bash
-# 登录授权 Telegram 账号 (首次运行需输入验证码)
-magebot login
+```
+magebot - Telegram 视频自动下载与直传工具
 
-# 后台守护进程控制
-magebot start     # 启动
-magebot stop      # 停止
-magebot restart   # 重启
+账号管理:
+  magebot login                           交互式登录 Telegram 账号
+  magebot logout                          退出登录并清除会话
 
-# 打开 TUI 实时监控面板
-magebot monitor
+配置管理:
+  magebot set <参数名> <值>                设置配置参数
+  magebot set cookie                      交互式设置平台 Cookie
+
+监控规则:
+  magebot add <目录路径>[:<目标群组>]       添加监控规则 (默认投递至收藏夹)
+  magebot rm <规则ID或目录路径>             删除监控规则
+  magebot ls                              列出所有监控规则
+  magebot listen <规则ID> <true|false>     开/关指定规则的媒体链接监听
+
+服务控制:
+  magebot start                           启动后台守护进程
+  magebot stop                            停止后台守护进程
+  magebot restart                         重启后台守护进程
+  magebot status                          查看守护进程运行状态
+  magebot monitor                         打开 TUI 实时监控面板
+
+诊断:
+  magebot check                           检查配置与授权状态
 ```
 
 ### 3. TUI 控制台命令 (magebot >)
 
 在 `monitor` 底部控制台中输入（支持大小写，可省略 `/` 符号）：
 - `download <URL>` : 手动提交视频链接同步任务。
+- `ls`             : 列出所有监控规则。
+- `listen <id> <t/f>` : 开/关指定规则的媒体链接监听。
 - `start`          : 在后台启动守护进程并自动连接。
 - `stop`           : 安全停止后台守护进程。
 - `help`           : 列出所有可用命令说明。
