@@ -13,6 +13,7 @@ pub struct Config {
     pub download_dir: Option<String>,
     pub yt_dlp_path: Option<String>,
     pub yt_dlp_args: Option<String>,
+    pub watch_rules: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Config {

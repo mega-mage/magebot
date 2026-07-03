@@ -5,16 +5,16 @@ echo "====== Magebot 一键部署脚本 (Linux) ======"
 
 # 1. 检测并安装系统基本依赖 (Debian/Ubuntu/CentOS 系列)
 if [ -f /etc/debian_version ]; then
-    echo "检测到 Debian/Ubuntu 系列系统，正在安装系统依赖项 (ffmpeg, curl, build-essential, openssl, sqlite3)..."
+    echo "检测到 Debian/Ubuntu 系列系统，正在安装系统依赖项 (ffmpeg, curl, build-essential, openssl, sqlite3, nodejs)..."
     sudo apt-get update -y
-    sudo apt-get install -y ffmpeg curl build-essential pkg-config libssl-dev sqlite3 libsqlite3-dev
+    sudo apt-get install -y ffmpeg curl build-essential pkg-config libssl-dev sqlite3 libsqlite3-dev nodejs
 elif [ -f /etc/redhat-release ]; then
-    echo "检测到 RHEL/CentOS 系列系统，正在安装系统依赖项 (ffmpeg, curl, openssl, sqlite)..."
+    echo "检测到 RHEL/CentOS 系列系统，正在安装系统依赖项 (ffmpeg, curl, openssl, sqlite, nodejs)..."
     # CentOS 需要 EPEL 源来获取 ffmpeg
     sudo dnf install -y epel-release || sudo yum install -y epel-release
-    sudo dnf install -y ffmpeg curl make gcc openssl-devel sqlite-devel || sudo yum install -y ffmpeg curl make gcc openssl-devel sqlite-devel
+    sudo dnf install -y ffmpeg curl make gcc openssl-devel sqlite-devel nodejs || sudo yum install -y ffmpeg curl make gcc openssl-devel sqlite-devel nodejs
 else
-    echo "⚠️ 未检测到兼容的包管理器，请确保手动安装了 ffmpeg、curl、openssl-dev 以及 sqlite3 依赖库。"
+    echo "⚠️ 未检测到兼容的包管理器，请确保手动安装了 ffmpeg、curl、openssl-dev、sqlite3 以及 nodejs 依赖。"
 fi
 
 # 2. 检查或安装 Rust/Cargo 编译环境

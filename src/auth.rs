@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::path::PathBuf;
 use grammers_client::{Client, SignInError};
 use grammers_session::storages::SqliteSession;
 use grammers_mtsender::SenderPool;
@@ -47,6 +48,22 @@ pub async fn get_client_with_updates(config: &Config) -> Result<(Client, tokio::
     Ok((client, pool.updates))
 }
 
+fn expand_tilde(path_str: &str) -> PathBuf {
+    if path_str.starts_with('~') {
+        if let Some(home) = dirs::home_dir() {
+            let mut s = &path_str[1..];
+            if s.starts_with('/') || s.starts_with('\\') {
+                s = &s[1..];
+            }
+            home.join(s)
+        } else {
+            PathBuf::from(path_str)
+        }
+    } else {
+        PathBuf::from(path_str)
+    }
+}
+
 pub async fn run_checks() -> Result<(), String> {
     let config = Config::load();
     let mut missing = Vec::new();
@@ -60,8 +77,11 @@ pub async fn run_checks() -> Result<(), String> {
     if config.phone_number.is_none() {
         missing.push("phone_number");
     }
-    if config.watch_dir.is_none() {
-        missing.push("watch_dir");
+    
+    let has_watch = config.watch_dir.is_some() 
+        || config.watch_rules.as_ref().map(|r| !r.is_empty()).unwrap_or(false);
+    if !has_watch {
+        missing.push("watch_dir (或 watch_rules)");
     }
 
     if !missing.is_empty() {
@@ -69,12 +89,13 @@ pub async fn run_checks() -> Result<(), String> {
     }
 
     // Check watch_dir exists or create warning
-    let watch_dir = config.watch_dir.as_ref().unwrap();
-    let watch_path = std::path::Path::new(watch_dir);
-    if !watch_path.exists() {
-        println!("Warning: watch_dir ({}) does not exist yet. It will be created when the bot starts.", watch_dir);
-    } else if !watch_path.is_dir() {
-        return Err(format!("watch_dir ({}) exists but is not a directory", watch_dir));
+    if let Some(ref watch_dir) = config.watch_dir {
+        let watch_path = expand_tilde(watch_dir);
+        if !watch_path.exists() {
+            println!("Warning: watch_dir ({}) does not exist yet. It will be created when the bot starts.", watch_dir);
+        } else if !watch_path.is_dir() {
+            return Err(format!("watch_dir ({}) exists but is not a directory", watch_dir));
+        }
     }
 
     // Check yt-dlp
@@ -161,6 +182,7 @@ pub async fn run_login() -> Result<(), String> {
     };
 
     // 3. Interactive prompt for phone_number
+    let mut phone_changed = false;
     let phone_number = match &config.phone_number {
         Some(phone) => {
             println!("Enter your phone number (default: {}):", phone);
@@ -168,6 +190,9 @@ pub async fn run_login() -> Result<(), String> {
             if input.is_empty() {
                 phone.clone()
             } else {
+                if &input != phone {
+                    phone_changed = true;
+                }
                 config.phone_number = Some(input.clone());
                 config_changed = true;
                 input
@@ -184,6 +209,14 @@ pub async fn run_login() -> Result<(), String> {
             input
         }
     };
+
+    if phone_changed {
+        let session_path = Config::get_session_path();
+        if session_path.exists() {
+            let _ = std::fs::remove_file(&session_path);
+            println!("ℹ️ 手机号码与原先登入的不一致，已清理旧的登入会话文件：{:?}", session_path);
+        }
+    }
 
     // Save configuration changes if any parameter was updated interactively
     if config_changed {

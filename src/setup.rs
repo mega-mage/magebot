@@ -73,6 +73,8 @@ pub fn print_set_help() {
   download_dir   视频临时下载目录 (默认: ~/.magebot/downloads)
   yt_dlp_path    yt-dlp 可执行程序路径 (默认: 在系统环境变量 PATH 中寻找 "yt-dlp")
   yt_dlp_args    yt-dlp 额外自定义参数 (例如: "--cookies-from-browser chrome" 用于规避机器人验证)
+  watch_rule     自定义监控目录和目标群组 (格式: "magebot set watch_rule <目录路径>:<目标群组ID或用户名>")
+  del_watch_rule 删除指定监控目录规则 (格式: "magebot set del_watch_rule <目录路径>")
 "#);
 }
 
@@ -146,6 +148,40 @@ pub fn run_set(args: &[String]) -> Result<(), String> {
         "watch_dir" => {
             config.watch_dir = Some(clean_val.clone());
         }
+        "watch_rule" => {
+            if let Some((path, target)) = clean_val.rsplit_once(':') {
+                let path = path.trim().to_string();
+                let target = target.trim().to_string();
+                if path.is_empty() || target.is_empty() {
+                    return Err("Format must be path:target".to_string());
+                }
+                let mut rules = config.watch_rules.unwrap_or_default();
+                rules.insert(path.clone(), target.clone());
+                config.watch_rules = Some(rules);
+                
+                config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+                println!("Successfully added watch rule: '{}' -> '{}'.", path, target);
+                return Ok(());
+            } else {
+                return Err("Format must be watch_rule <path>:<target> (e.g., watch_rule \"C:\\path:-1001234567890\")".to_string());
+            }
+        }
+        "del_watch_rule" => {
+            let path = clean_val.trim().to_string();
+            let mut removed = false;
+            if let Some(ref mut rules) = config.watch_rules {
+                if rules.remove(&path).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                config.save().map_err(|e| format!("Failed to save config: {}", e))?;
+                println!("Successfully removed watch rule for path: '{}'.", path);
+                return Ok(());
+            } else {
+                return Err(format!("No watch rule found for path: '{}'.", path));
+            }
+        }
         "auto_delete" => {
             let val = match clean_val.to_lowercase().as_str() {
                 "true" | "1" | "yes" | "on" => true,
@@ -165,7 +201,7 @@ pub fn run_set(args: &[String]) -> Result<(), String> {
         }
         _ => {
             return Err(format!(
-                "Unknown configuration key: '{}'. Valid keys: api_id, api_hash, phone_number, watch_dir, auto_delete, download_dir, yt_dlp_path, yt_dlp_args",
+                "Unknown configuration key: '{}'. Valid keys: api_id, api_hash, phone_number, watch_dir, auto_delete, download_dir, yt_dlp_path, yt_dlp_args, watch_rule, del_watch_rule",
                 key
             ));
         }
