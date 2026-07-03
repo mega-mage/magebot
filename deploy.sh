@@ -31,9 +31,32 @@ echo "正在创建工作文件夹..."
 mkdir -p dependency
 mkdir -p ~/.magebot/downloads
 
-# 4. 下载最新版 Linux-x86_64 版 yt-dlp
-echo "正在下载最新版 Linux yt-dlp 核心..."
-curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o dependency/yt-dlp
+# 4. 检测系统平台架构并下载对应的 yt-dlp 核心
+OS_NAME=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH_NAME=$(uname -m)
+
+echo "检测到操作系统: $OS_NAME, 硬件架构: $ARCH_NAME"
+
+YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+
+if [ "$OS_NAME" = "linux" ]; then
+    if [ "$ARCH_NAME" = "x86_64" ]; then
+        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+    elif [ "$ARCH_NAME" = "aarch64" ] || [ "$ARCH_NAME" = "arm64" ]; then
+        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
+    elif [[ "$ARCH_NAME" =~ armv7 ]]; then
+        YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_armv7l"
+    else
+        echo "⚠️ 尚未适配的 Linux 架构 ($ARCH_NAME)，默认下载标准 x86_64 版本..."
+    fi
+elif [ "$OS_NAME" = "darwin" ]; then
+    YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+else
+    echo "⚠️ 未知的操作系统平台 ($OS_NAME)，将默认下载标准 Linux 版本..."
+fi
+
+echo "正在从 $YTDLP_URL 下载适合当前架构的 yt-dlp 核心..."
+curl -L "$YTDLP_URL" -o dependency/yt-dlp
 chmod +x dependency/yt-dlp
 echo "✅ yt-dlp 准备完毕。"
 
