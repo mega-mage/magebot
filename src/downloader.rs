@@ -836,7 +836,7 @@ async fn try_download_twitter_media(
         .args(&[
             "-s",
             "-A",
-            "magebot/0.1.0",
+            "magebot/0.1.1",
             &api_url,
         ])
         .output()

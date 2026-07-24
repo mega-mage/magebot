@@ -9,10 +9,10 @@
 - **纯鼠标驱动 Tab 式 TUI 监控控制台 (`ratatui` + `crossterm`)**：
   - **📊 概览 Tab**：实时展示守护进程 PID、连接状态、监控规则数及活动传输任务进度条（含下载/上传速度与 ETA）。
   - **📋 规则 Tab**：可视化表格展示所有监控规则，支持点击 `[🔵 ON]` / `[⚫ OFF]` 开关即时开关监听，以及点击 `[➕ 添加规则]` / `[🗑 删除]` 交互式管理。
-  - **⚙️ 参数设置 Tab**：编辑并在线更新 `auto_delete``download_dir``yt_dlp_path``yt_dlp_args` 及最大并发上传数，支持一键 `[💾 保存修改]` 到 `config.toml`。
+  - **⚙️ 参数设置 Tab**：编辑并在线更新 `auto_delete`、`download_dir`、`yt_dlp_path`、`yt_dlp_args` 及最大并发上传数，支持一键 `[💾 保存修改]` 到 `config.toml`。
   - **📜 实时日志 Tab**：守护进程日志实时流式查看，支持鼠标滚轮自由上下滑动与暂停/恢复自动滚动。
   - **🔽 视频下载 Tab**：可视化粘贴 URL 发起异步下载任务，内置 `[📋 粘贴]` 按钮关联系统剪贴板。
-  - **底部控制栏**：包含 `[▶ 启动服务]``[■ 停止服务]``[↻ 重启服务]` 及 `[🔍 诊断检查]` 快捷按钮，无需打字。
+  - **底部控制栏**：包含 `[▶ 启动服务]`、`[■ 停止服务]`、`[↻ 重启服务]` 及 `[🔍 诊断检查]` 快捷按钮，无需打字。
 - **自动去重清理**：任务成功/失败后自动撤回原消息及提示，将视频/图片与原链接（附带 `[Uploaded]` / `[Failed]` 前缀）合并发送，防止死循环。
 - **推特全媒体极速同步**：
   - **纯图推文**：自动拦截推特图片，通过 FxTwitter API 高清直链多线程下载，跳过 yt-dlp 的缓慢冷启动。
@@ -39,19 +39,27 @@
 
 ---
 
-## 🚀 部署指南 (Linux 一键部署)
+## 🚀 部署与升级指南 (Linux)
 
-我们提供了一键式部署与编译脚本 [**`deploy.sh`**](file:///j:/RustProjects/upload_tel_bot/deploy.sh)，支持在 Debian/Ubuntu/CentOS 服务器上完成一键初始化：
+我们提供了一键式部署与更新脚本 [**`deploy.sh`**](file:///j:/RustProjects/upload_tel_bot/deploy.sh)：
 
+### 1. 首次全量部署安装
 ```bash
 # 1. 克隆代码仓库并进入目录
 git clone https://github.com/mega-mage/magebot.git
 cd magebot
 
-# 2. 赋予脚本执行权限并运行
+# 2. 赋予脚本执行权限并运行部署
 chmod +x deploy.sh
 ./deploy.sh
 ```
+
+### 2. 增量更新与快捷升级 (`update`)
+在已有仓库目录中直接运行：
+```bash
+./deploy.sh update
+```
+> `update` 选项会自动停止旧的守护进程、从 GitHub 拉取最新源码、更新最新的 `yt-dlp` 核心、重新编译 Release 版本并替换全局 `/usr/local/bin/magebot` 二进制程序。
 
 ---
 

@@ -62,7 +62,7 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
 
     let title_line = Line::from(vec![
         Span::styled(" 🤖 MageBot ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::styled("v0.1.0", Style::default().fg(Color::DarkGray)),
+        Span::styled("v0.1.1", Style::default().fg(Color::DarkGray)),
         Span::styled(" | 纯鼠标交互图形控制台", Style::default().fg(Color::Gray)),
     ]);
 
