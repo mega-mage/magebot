@@ -27,7 +27,11 @@ pub fn spawn_event_reader(tx: tokio::sync::mpsc::UnboundedSender<TuiEvent>) {
                     }
                     _ => {}
                 },
-                Ok(false) => {}
+                Ok(false) => {
+                    if tx.is_closed() {
+                        break;
+                    }
+                }
                 Err(_) => break,
             }
         }

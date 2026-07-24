@@ -131,5 +131,5 @@ pub async fn run_monitor() -> Result<(), Box<dyn std::error::Error>> {
     );
     let _ = terminal.show_cursor();
 
-    Ok(())
+    std::process::exit(0);
 }
